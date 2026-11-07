@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+// Rex tuicr review (see README.md: one action pastes, one submits) runs this in
+// a pane on the right of an agent's pane, in the agent's folder: snapshot
+// tuicr's saved comments, run `tuicr -w`, then paste the comments that are new
+// or edited into the agent, and press Enter for "submit". A port of
+// github.com/jmayaalv/herdr-app-tuicr (touched/fresh/format from its review.js).
+// Usage: tuicr-review paste|submit SESSION_ID AGENT_BLOCK_ID
+const { execFileSync, spawnSync } = require("node:child_process");
+
+const [mode, session, agent] = process.argv.slice(2);
+const dir = process.cwd();
+const run = (cmd, args, input) => execFileSync(cmd, args, { encoding: "utf8", input });
+const json = (cmd, args) => JSON.parse(run(cmd, args));
+const sessions = () => json("tuicr", ["review", "list", "--repo", dir]);
+const comments = (path) => json("tuicr", ["review", "comments", "--session", path]);
+
+function format(list, context) {
+  const items = list.map((c, i) => {
+    const tag = !c.comment_type || c.comment_type === "none" ? "" : `[${c.comment_type}] `;
+    return `${i + 1}. ${c.location}\n   ${tag}${c.content.replace(/\n/g, "\n   ")}`;
+  });
+  const head = `Code review comments from tuicr${context ? ` (${context})` : ""}:`;
+  return `${head}\n\n${items.join("\n\n")}\n\nPlease address each comment. Reply with what you changed per item.`;
+}
+
+function pause(message) {
+  console.log(message);
+  spawnSync("/bin/sh", ["-c", "read -r _"], { stdio: "inherit" });
+}
+
+const rex = (args) => run("rex", ["-s", session, ...args]);
+const paste = (text) => run("rex", ["api", "call", "-s", session, "block.event", "-"],
+  JSON.stringify({ session_id: session, block_id: agent, event: { type: "paste", payload: { text } } }));
+
+try {
+  // tuicr keeps comments until a commit, so only those new or edited since now go back.
+  const before = sessions();
+  const seen = Object.fromEntries(before.filter((s) => s.comment_count)
+    .map((s) => [s.path, Object.fromEntries(comments(s.path).map((c) => [c.id, c.content]))]));
+  const stamp = new Map(before.map((s) => [s.path, s.updated_at]));
+
+  spawnSync("tuicr", ["-w"], { stdio: "inherit" });
+
+  const fresh = sessions().filter((s) => stamp.get(s.path) !== s.updated_at)
+    .flatMap((s) => comments(s.path).filter((c) => (seen[s.path] ?? {})[c.id] !== c.content));
+  if (!fresh.length) process.exit(0);
+
+  const [top, branch] = run("git", ["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"]).trim().split("\n");
+  const text = format(fresh, `repo: ${top.split("/").pop()}, branch: ${branch}`);
+  try {
+    paste(text);
+    if (mode === "submit") rex(["send-key", "-b", agent, "enter"]);
+    run("rex", ["api", "call", "-s", session, "session.focus_block", JSON.stringify({ session_id: session, block_id: agent })]);
+  } catch (e) {
+    run("pbcopy", [], text);
+    pause(`Couldn't reach the agent's pane (${String(e.message).trim()}).\nThe comments are on the clipboard. Press Enter to close.`);
+  }
+} catch (e) {
+  pause(`tuicr review failed: ${String(e.message).trim()}\nPress Enter to close.`);
+}
