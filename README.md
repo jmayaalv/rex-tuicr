@@ -3,8 +3,9 @@
 Review a coding agent's uncommitted changes in [tuicr](https://tuicr.dev) right beside it in
 [Rex](https://www.superlogical.com/rex), and hand your comments back to that agent.
 
-On an agent's pane (Claude Code, Codex, … anything that reports a Rex program status), one
-key opens `tuicr -w` in a pane on its right, in the agent's folder. Save and quit tuicr
+On a pane in a repo, one key opens `tuicr -w` in a pane on its right, in that pane's
+folder. When the pane runs an agent (Claude Code, Codex, … anything that reports a Rex
+program status), your comments go back to it. Save and quit tuicr
 (`ZZ` or `:wq`) and the comments that are new or edited since the review opened go to the
 agent as one numbered prompt:
 
@@ -21,10 +22,12 @@ Please address each comment. Reply with what you changed per item.
 - **Submit** (palette only below): pasted and Enter pressed.
 
 tuicr keeps old comments until a commit, so the script snapshots every tuicr session of the
-checkout first and sends only what changed. On a plain shell pane it refuses ("Focus an
-agent's pane first."), since Enter there would run the comments. If the agent's pane is
-gone, the comments go to the clipboard. A port of
-[herdr-app-tuicr](https://github.com/jmayaalv/herdr-app-tuicr).
+checkout first and sends only what changed.
+
+It works on any pane in a repo. On a pane with no agent (a shell, an editor) nothing is
+typed into it, since Enter there would run the comments: they go to the clipboard instead.
+If the agent's pane is gone by the time you quit tuicr, they go to the clipboard too. A port
+of [herdr-app-tuicr](https://github.com/jmayaalv/herdr-app-tuicr).
 
 ## Needs
 
@@ -49,8 +52,9 @@ end
 
 local function tuicr_review(mode)
   return function(ctx)
+    -- Agents report a program status; any other pane only gets the clipboard.
     local st = rex.block.call(terminal, "program_status", { block_id = ctx.block_id })
-    if not (st and st.records and #st.records > 0) then error("Focus an agent's pane first.", 0) end
+    local how = (st and st.records and #st.records > 0) and mode or "clipboard"
     local _, err = rex.session.new_split{
       anchor_id = ctx.block_id,
       direction = "horizontal",
@@ -61,7 +65,7 @@ local function tuicr_review(mode)
         label   = "tuicr",
         options = {
           cwd          = pane_folder(ctx),
-          command      = { os.getenv("HOME") .. "/.config/rex/tuicr-review", mode, ctx.session_id, ctx.block_id },
+          command      = { os.getenv("HOME") .. "/.config/rex/tuicr-review", how, ctx.session_id, ctx.block_id },
           path_prepend = { "/opt/homebrew/bin" },  -- where tuicr and node are
         },
       },

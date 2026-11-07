@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Rex tuicr review (see README.md: one action pastes, one submits) runs this in
-// a pane on the right of an agent's pane, in the agent's folder: snapshot
-// tuicr's saved comments, run `tuicr -w`, then paste the comments that are new
-// or edited into the agent, and press Enter for "submit". A port of
+// a pane on the right of the source pane, in its folder: snapshot tuicr's saved
+// comments, run `tuicr -w`, then paste the comments that are new or edited into
+// the source pane's agent, and press Enter for "submit". "clipboard" (a pane
+// with no agent) only copies them. A port of
 // github.com/jmayaalv/herdr-app-tuicr (touched/fresh/format from its review.js).
-// Usage: tuicr-review paste|submit SESSION_ID AGENT_BLOCK_ID
+// Usage: tuicr-review paste|submit|clipboard SESSION_ID SOURCE_BLOCK_ID
 const { execFileSync, spawnSync } = require("node:child_process");
 
 const [mode, session, agent] = process.argv.slice(2);
@@ -47,6 +48,12 @@ try {
 
   const [top, branch] = run("git", ["rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD"]).trim().split("\n");
   const text = format(fresh, `repo: ${top.split("/").pop()}, branch: ${branch}`);
+  if (mode === "clipboard") {
+    run("pbcopy", [], text);
+    console.log(`${fresh.length} comment${fresh.length === 1 ? "" : "s"} copied to the clipboard.`);
+    spawnSync("sleep", ["1.5"]);
+    process.exit(0);
+  }
   try {
     paste(text);
     if (mode === "submit") rex(["send-key", "-b", agent, "enter"]);
